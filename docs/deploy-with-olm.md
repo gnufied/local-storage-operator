@@ -34,7 +34,6 @@ oc describe no -l node-role.kubernetes.io/worker | grep hostname
 	kubernetes.io/hostname=ip-10-0-136-143
 	kubernetes.io/hostname=ip-10-0-140-255
 	kubernetes.io/hostname=ip-10-0-144-180
-	
 ```
 
 Create a LocalVolume manifest named ``create-cr.yaml`` using the hostnames obtained above:
@@ -61,8 +60,8 @@ spec:
     - storageClassName: "local-sc"
       volumeMode: Filesystem
       fsType: xfs
-      deviceNames:
-        - xvdf
+      devicePaths:
+        - /dev/xvdf
 ```
 
 ### CR using volumeMode - Block
@@ -86,8 +85,8 @@ spec:
   storageClassDevices:
     - storageClassName: "localblock-sc"
       volumeMode: Block 
-      deviceNames:
-        - xvdg
+      devicePaths:
+        - /dev/xvdg
 ```
 
 ### Deploy the CR

@@ -21,6 +21,8 @@ type fakeApiUpdater struct {
 	oldInstance         *localv1.LocalVolume
 	sas                 []*corev1.ServiceAccount
 	configMaps          []*corev1.ConfigMap
+	roles               []*rbacv1.Role
+	roleBindings        []*rbacv1.RoleBinding
 	clusterRoles        []*rbacv1.ClusterRole
 	clusterRoleBindings []*rbacv1.ClusterRoleBinding
 	storageClasses      []*storagev1.StorageClass
@@ -41,6 +43,16 @@ func (s *fakeApiUpdater) applyServiceAccount(sa *corev1.ServiceAccount) (*corev1
 func (s *fakeApiUpdater) applyConfigMap(configmap *corev1.ConfigMap) (*corev1.ConfigMap, bool, error) {
 	s.configMaps = append(s.configMaps, configmap)
 	return configmap, true, nil
+}
+
+func (s *fakeApiUpdater) applyRole(role *rbacv1.Role) (*rbacv1.Role, bool, error) {
+	s.roles = append(s.roles, role)
+	return role, true, nil
+}
+
+func (s *fakeApiUpdater) applyRoleBinding(roleBinding *rbacv1.RoleBinding) (*rbacv1.RoleBinding, bool, error) {
+	s.roleBindings = append(s.roleBindings, roleBinding)
+	return roleBinding, true, nil
 }
 
 func (s *fakeApiUpdater) applyClusterRole(clusterRole *rbacv1.ClusterRole) (*rbacv1.ClusterRole, bool, error) {

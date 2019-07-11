@@ -43,10 +43,14 @@ const (
 	// Name of the component
 	componentName = "local-storage-operator"
 
-	localDiskLocation              = "/mnt/local-storage"
-	provisionerServiceAccount      = "local-storage-admin"
-	provisionerPVRoleBindingName   = "local-storage-provisioner-pv-binding"
-	provisionerNodeRoleName        = "local-storage-provisioner-node-clusterrole"
+	localDiskLocation            = "/mnt/local-storage"
+	provisionerServiceAccount    = "local-storage-admin"
+	provisionerPVRoleBindingName = "local-storage-provisioner-pv-binding"
+	provisionerNodeRoleName      = "local-storage-provisioner-node-clusterrole"
+
+	localVolumeRoleName        = "local-storage-provisioner-cr-role"
+	localVolumeRoleBindingName = "local-storage-provisioner-cr-rolebinding"
+
 	defaultPVClusterRole           = "system:persistent-volume-provisioner"
 	provisionerNodeRoleBindingName = "local-storage-provisioner-node-binding"
 	ownerNamespaceLabel            = "local.storage.openshift.io/owner-namespace"
@@ -338,6 +342,52 @@ func (h *Handler) syncRBACPolicies(o *localv1.LocalVolume) error {
 	_, _, err = h.apiClient.applyClusterRoleBinding(nodeRoleBinding)
 	if err != nil {
 		return fmt.Errorf("error creating node role binding %s with %v", nodeRoleBinding.Name, err)
+	}
+
+	localVolumeRole := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      localVolumeRoleName,
+			Namespace: o.Namespace,
+			Labels:    operatorLabel,
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				Verbs:     []string{"get"},
+				APIGroups: []string{"local.storage.openshift.io"},
+				Resources: []string{"*"},
+			},
+		},
+	}
+	addOwner(&localVolumeRole.ObjectMeta, o)
+	_, _, err = h.apiClient.applyRole(localVolumeRole)
+	if err != nil {
+		return fmt.Errorf("error applying localvolume role %s with %v", localVolumeRole.Name, err)
+	}
+
+	localVolumeRoleBinding := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      localVolumeRoleBindingName,
+			Namespace: o.Namespace,
+			Labels:    operatorLabel,
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      serviceAccount.Name,
+				Namespace: serviceAccount.Namespace,
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     localVolumeRole.Name,
+		},
+	}
+
+	addOwner(&localVolumeRoleBinding.ObjectMeta, o)
+	_, _, err = h.apiClient.applyRoleBinding(localVolumeRoleBinding)
+	if err != nil {
+		return fmt.Errorf("error applying localvolume rolebinding %s with %v", localVolumeRoleBinding.Name, err)
 	}
 	return nil
 }

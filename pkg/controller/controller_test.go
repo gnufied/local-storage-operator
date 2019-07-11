@@ -9,6 +9,7 @@ import (
 	operatorv1 "github.com/openshift/api/operator/v1"
 	localv1 "github.com/openshift/local-storage-operator/pkg/apis/local/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	"k8s.io/api/core/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -129,6 +130,32 @@ func TestSyncLocalVolumeProvider(t *testing.T) {
 
 	if c.LastTransitionTime.IsZero() {
 		t.Fatalf("expect last transition time to be set")
+	}
+
+	configMaps := apiClient.configMaps
+	var provisionerConfigMap *v1.ConfigMap
+
+	for _, c := range configMaps {
+		if c.Name == "local-disks-local-provisioner-configmap" {
+			provisionerConfigMap = c
+		}
+	}
+
+	provisionerConfigMapData := provisionerConfigMap.Data
+	labelsForPV, ok := provisionerConfigMapData["labelsForPV"]
+	if !ok {
+		t.Fatalf("expected labels for pv got nothing")
+	}
+
+	var labelsForPVMap map[string]string
+	err = yaml.Unmarshal([]byte(labelsForPV), &labelsForPVMap)
+	if err != nil {
+		t.Fatalf("error unmarshalling pv labels : %v", err)
+	}
+
+	crOwnerValue, ok := labelsForPVMap["local-volume-owner"]
+	if crOwnerValue != "local-disks" {
+		t.Fatalf("expected cr owner to be %s got %s", "local-disks", crOwnerValue)
 	}
 
 	provisionedDaemonSets := apiClient.daemonSets

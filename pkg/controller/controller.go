@@ -371,8 +371,15 @@ func (h *Handler) generateProvisionerConfigMap(cr *localv1.LocalVolume) (*corev1
 	if err != nil {
 		return nil, fmt.Errorf("error creating configmap while marshalling yaml %v", err)
 	}
+
+	pvLabelString, err := yaml.Marshal(pvLabels(cr.Name))
+	if err != nil {
+		return nil, fmt.Errorf("error generating pv labels : %v", err)
+	}
+
 	configmap.Data = map[string]string{
 		"storageClassMap": string(y),
+		"labelsForPV":     string(pvLabelString),
 	}
 	addOwnerLabels(&configmap.ObjectMeta, cr)
 	addOwner(&configmap.ObjectMeta, cr)
@@ -728,6 +735,13 @@ func diskMakerLabels(crName string) map[string]string {
 func provisionerLabels(crName string) map[string]string {
 	return map[string]string{
 		"app": fmt.Sprintf("local-volume-provisioner-%s", crName),
+	}
+}
+
+// name of the CR that owns this local volume
+func pvLabels(crName string) map[string]string {
+	return map[string]string{
+		"local-volume-owner": crName,
 	}
 }
 

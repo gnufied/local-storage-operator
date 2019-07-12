@@ -476,14 +476,22 @@ func (h *Handler) removeUnExpectedStorageClasses(cr *localv1.LocalVolume, expect
 
 func (h *Handler) generateDiskMakerConfig(cr *localv1.LocalVolume) (*corev1.ConfigMap, error) {
 	h.diskMakerConfigName = cr.Name + "-diskmaker-configmap"
-	configMapData := make(diskmaker.DiskConfig)
+	configMapData := &diskmaker.DiskConfig{
+		Disks:           map[string]*diskmaker.Disks{},
+		OwnerName:       cr.Name,
+		OwnerNamespace:  cr.Namespace,
+		OwnerKind:       localv1.LocalVolumeKind,
+		OwnerUID:        string(cr.UID),
+		OwnerAPIVersion: localv1.SchemeGroupVersion.String(),
+	}
+
 	storageClassDevices := cr.Spec.StorageClassDevices
 	for _, storageClassDevice := range storageClassDevices {
 		disks := new(diskmaker.Disks)
 		if len(storageClassDevice.DevicePaths) > 0 {
 			disks.DevicePaths = storageClassDevice.DevicePaths
 		}
-		configMapData[storageClassDevice.StorageClassName] = disks
+		configMapData.Disks[storageClassDevice.StorageClassName] = disks
 	}
 
 	configMap := &corev1.ConfigMap{

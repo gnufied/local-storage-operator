@@ -51,6 +51,6 @@ func (reporter *eventReporter) report(e *event, lv *localv1.LocalVolume) {
 		return
 	}
 
-	reporter.apiClient.recordEvent(lv, e.eventType, e.eventReason, e.message)
+	reporter.apiClient.recordEvent(lv, e)
 	reporter.reportedEvents.Insert(eventKey)
 }

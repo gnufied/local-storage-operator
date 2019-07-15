@@ -27,11 +27,6 @@ var (
 	diskByIDPath  = "/dev/disk/by-id/*"
 )
 
-const (
-	// KubeConfigEnv will (optionally) specify the location of kubeconfig file on the node.
-	KubeConfigEnv = "KUBECONFIG"
-)
-
 type DiskMaker struct {
 	configLocation  string
 	symlinkLocation string
@@ -83,6 +78,7 @@ func (d *DiskMaker) loadConfig() (*DiskConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error fetching local volume %s/%s with %v", diskConfig.OwnerName, diskConfig.OwnerNamespace, err)
 	}
+	d.localVolume = lv
 
 	return &diskConfig, nil
 }

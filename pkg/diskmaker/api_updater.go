@@ -11,7 +11,7 @@ import (
 )
 
 type apiUpdater interface {
-	recordEvent(lv *localv1.LocalVolume, eventType, reason, messageFmt string, args ...interface{})
+	recordEvent(lv *localv1.LocalVolume, e *event)
 	getLocalVolume(lv *localv1.LocalVolume) (*localv1.LocalVolume, error)
 }
 
@@ -28,8 +28,8 @@ func newAPIUpdater() apiUpdater {
 	return apiClient
 }
 
-func (s *sdkAPIUpdater) recordEvent(lv *localv1.LocalVolume, eventType, reason, messageFmt string, args ...interface{}) {
-	s.recorder.Eventf(lv, eventType, reason, messageFmt)
+func (s *sdkAPIUpdater) recordEvent(lv *localv1.LocalVolume, e *event) {
+	s.recorder.Eventf(lv, e.eventType, e.eventReason, e.message)
 }
 
 func (s *sdkAPIUpdater) getLocalVolume(lv *localv1.LocalVolume) (*localv1.LocalVolume, error) {

@@ -79,6 +79,7 @@ type LocalVolumeDiscoveryPolicy struct {
 	// +required
 	DeviceTypes []string
 	// A list of regular expressions that will be used to exclude certain devices
+	// For example - ["^rbd[0-9]+p?[0-9]{0,}$"]
 	// +optional
 	DeviceExclusionFilter []string
 }

@@ -74,7 +74,7 @@ type StorageClassDevice struct {
 
 type LocalVolumeDiscoveryPolicy struct {
 	// Device type that should be used for localvolumes. This would be type returned
-	// by output of lsblk. If empty local-storage-operator will use all disk types.
+	// by output of lsblk.
 	// For example - ["part", "disk"]
 	// +required
 	DeviceTypes []string

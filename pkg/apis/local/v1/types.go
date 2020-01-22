@@ -65,6 +65,22 @@ type StorageClassDevice struct {
 	// A list of device paths which would be chosen for local storage.
 	// For example - ["/dev/sda", "/dev/sdb", "/dev/disk/by-id/ata-crucial"]
 	DevicePaths []string `json:"devicePaths,omitempty"`
+
+	// DiscoverAllLocalDevices can be used to discover all local devices
+	// on the node and automatically create PVs.
+	// +optional
+	DiscoverAllLocalDevices *LocalVolumeDiscoveryPolicy
+}
+
+type LocalVolumeDiscoveryPolicy struct {
+	// Device type that should be used for localvolumes. This would be type returned
+	// by output of lsblk. If empty local-storage-operator will use all disk types.
+	// For example - ["part", "disk"]
+	// +required
+	DeviceTypes []string
+	// A list of regular expressions that will be used to exclude certain devices
+	// +optional
+	DeviceExclusionFilter []string
 }
 
 type LocalVolumeStatus struct {

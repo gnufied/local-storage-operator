@@ -14,8 +14,7 @@ import (
 	"github.com/operator-framework/operator-sdk/pkg/k8sclient"
 	"github.com/operator-framework/operator-sdk/pkg/sdk"
 	appsv1 "k8s.io/api/apps/v1"
-	"k8s.io/api/core/v1"
-	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -824,11 +823,12 @@ func addOwner(meta *metav1.ObjectMeta, cr *localv1.LocalVolume) {
 	trueVal := true
 	meta.OwnerReferences = []metav1.OwnerReference{
 		{
-			APIVersion: localv1.SchemeGroupVersion.String(),
-			Kind:       localv1.LocalVolumeKind,
-			Name:       cr.Name,
-			UID:        cr.UID,
-			Controller: &trueVal,
+			APIVersion:         localv1.SchemeGroupVersion.String(),
+			Kind:               localv1.LocalVolumeKind,
+			Name:               cr.Name,
+			UID:                cr.UID,
+			Controller:         &trueVal,
+			BlockOwnerDeletion: &trueVal,
 		},
 	}
 }

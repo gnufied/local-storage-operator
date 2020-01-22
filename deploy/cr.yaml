@@ -7,6 +7,12 @@ spec:
     - storageClassName: "foobar"
       volumeMode: Filesystem
       fsType: ext4
+      disoverAllLocalDevices:
+        deviceTypes:
+          - disk
+          - part
+          - crypt
+          - lvmt
+          - crypt
       devicePaths:
-        - /dev/vde
-        - /dev/vdf
+        - /dev/sandbox/local

@@ -458,6 +458,7 @@ func (r *LocalVolumeReconciler) resolveValidDeviceLocation(devicePath string, fo
 	if strings.HasPrefix(devicePath, diskByIDPrefix) {
 		matchedDeviceID, matchedDiskName, err := r.findDeviceByID(devicePath)
 		if err != nil {
+			r.checkForStalePVs(context.TODO(), devicePath)
 			return nil, false, err
 		}
 		baseDeviceName = filepath.Base(matchedDiskName)
@@ -478,6 +479,21 @@ func (r *LocalVolumeReconciler) resolveValidDeviceLocation(devicePath string, fo
 	}
 	deviceLocation.BlockDevice = blockDevice
 	return deviceLocation, true, nil
+}
+
+func (r *LocalVolumeReconciler) checkForStalePVs(ctx context.Context, devicePath string) error {
+	currentDevice, found := r.pvLinkCache.GetDirectLVDLMatch(devicePath)
+	if found {
+		lvdl, blockDevice := currentDevice.GetLVDLAndBlockDevice()
+		if lvdl == nil || blockDevice == (internal.BlockDevice{}) {
+			return nil
+		}
+
+		deviceLinkHandler := common.NewDeviceLinkHandler(r.Client, r.ClientReader, r.runtimeConfig.Recorder, r.pvLinkCache)
+		_, err := deviceLinkHandler.ApplyStatus(ctx, lvdl.Name, r.runtimeConfig.Namespace, blockDevice, r.localVolume, devicePath)
+		return err
+	}
+	return nil
 }
 
 func (r *LocalVolumeReconciler) provisionValidDevice(ctx context.Context, storageClass, symLinkDirPath, devicePath string, deviceLocation *internal.DiskLocation, mountPointMap sets.String) bool {

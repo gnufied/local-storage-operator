@@ -133,7 +133,7 @@ func TestResolveValidDeviceLocation(t *testing.T) {
 			d, _ := getFakeDiskMaker(t, "/mnt/local-storage")
 			d.fsInterface = stubFileSystemInterface{evalFunc: test.fakeEvalSymlink}
 
-			deviceLocation, matched, err := d.resolveValidDeviceLocation(test.devicePath, test.forceWipe, test.availableBlockDevices)
+			deviceLocation, matched, err := d.resolveValidDeviceLocation(context.TODO(), test.devicePath, test.forceWipe, test.availableBlockDevices)
 			if err != nil {
 				t.Fatalf("error resolving device location %v", err)
 			}
@@ -1013,7 +1013,7 @@ func TestProcessNewSymlink_SiblingFallback(t *testing.T) {
 				{Name: cfg.BlockDevKName, KName: cfg.BlockDevKName},
 			}
 			devicePath := filepath.Join("/dev", cfg.BlockDevKName)
-			deviceLocation, matched, err := r.resolveValidDeviceLocation(devicePath, false, validDevices)
+			deviceLocation, matched, err := r.resolveValidDeviceLocation(context.TODO(), devicePath, false, validDevices)
 			assert.NoError(t, err)
 			assert.True(t, matched)
 			if deviceLocation.DiskID == "" {
@@ -1051,6 +1051,119 @@ func TestProcessNewSymlink_SiblingFallback(t *testing.T) {
 			assert.Equal(t, cfg.NewByID, gotLVDL.Status.CurrentLinkTarget)
 			assert.Equal(t, cfg.NewByID, gotLVDL.Status.PreferredLinkTarget)
 			assert.ElementsMatch(t, []string{cfg.NewByID, cfg.SiblingByID}, gotLVDL.Status.ValidLinkTargets)
+		})
+	}
+}
+
+func TestUpdatePVLinkStatusOnLookupFailure(t *testing.T) {
+	const (
+		brokenPath = "/dev/disk/by-id/scsi-broken"
+		goodPath   = "/dev/disk/by-id/wwn-good"
+		pvName     = "test-pv-stale"
+		namespace  = "default"
+	)
+
+	fakeBlockDevice := internal.BlockDevice{Name: "sdb", KName: "sdb", PathByID: goodPath}
+
+	tests := []struct {
+		name         string
+		seedInCache  bool
+		validTargets []string
+		wantUpdated  bool
+	}{
+		{
+			name:        "no-op when device not in cache",
+			seedInCache: false,
+			wantUpdated: false,
+		},
+		{
+			name:         "no-op when all valid link targets broken",
+			seedInCache:  true,
+			validTargets: []string{brokenPath},
+			wantUpdated:  false,
+		},
+		{
+			name:         "updates LVDL when a valid target resolves",
+			seedInCache:  true,
+			validTargets: []string{goodPath, brokenPath},
+			wantUpdated:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lv := &localv1.LocalVolume{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: localv1.GroupVersion.String(),
+					Kind:       localv1.LocalVolumeKind,
+				},
+				ObjectMeta: metav1.ObjectMeta{Name: "lv-stale-test", Namespace: namespace},
+			}
+			pv := &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: pvName},
+				Spec: corev1.PersistentVolumeSpec{
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						Local: &corev1.LocalVolumeSource{Path: "/mnt/local-storage/sc/" + pvName},
+					},
+				},
+			}
+			lvdl := &localv1.LocalVolumeDeviceLink{
+				ObjectMeta: metav1.ObjectMeta{Name: pvName, Namespace: namespace},
+				Spec: localv1.LocalVolumeDeviceLinkSpec{
+					PersistentVolumeName: pvName,
+					Policy:               localv1.DeviceLinkPolicyNone,
+					NodeName:             "test-node",
+				},
+				Status: localv1.LocalVolumeDeviceLinkStatus{
+					CurrentLinkTarget:   goodPath,
+					PreferredLinkTarget: goodPath,
+					ValidLinkTargets:    tc.validTargets,
+				},
+			}
+
+			d, tcCtx := getFakeDiskMaker(t, "/mnt/local-storage", lv, pv, lvdl)
+			d.localVolume = lv
+			d.runtimeConfig.Namespace = namespace
+
+			if tc.seedInCache {
+				d.pvLinkCache.SeedForTests(lvdl)
+			}
+
+			origGetBlockDevice := internal.GetBlockDeviceFn
+			origGlob := internal.FilePathGlob
+			origExec := internal.CmdExecutor
+			t.Cleanup(func() {
+				internal.GetBlockDeviceFn = origGetBlockDevice
+				internal.FilePathGlob = origGlob
+				internal.CmdExecutor = origExec
+			})
+
+			// Return the fake block device only for goodPath; brokenPath fails.
+			internal.GetBlockDeviceFn = func(symlink string) (internal.BlockDevice, error) {
+				if symlink == goodPath {
+					return fakeBlockDevice, nil
+				}
+				return internal.BlockDevice{}, fmt.Errorf("symlink not found: %s", symlink)
+			}
+			// ApplyStatus uses FilePathGlob to enumerate all by-id symlinks for the device.
+			internal.FilePathGlob = func(string) ([]string, error) {
+				return []string{goodPath}, nil
+			}
+			// ApplyStatus calls blkid -s UUID; return empty (no filesystem UUID).
+			internal.CmdExecutor = diskmakertest.BlkidAlwaysFakeExec("", nil)
+
+			err := d.updatePVLinkStatusOnLookupFailure(t.Context(), brokenPath)
+			assert.NoError(t, err)
+
+			got := &localv1.LocalVolumeDeviceLink{}
+			assert.NoError(t, tcCtx.fakeClient.Get(t.Context(), types.NamespacedName{Name: pvName, Namespace: namespace}, got))
+
+			if tc.wantUpdated {
+				assert.Equal(t, brokenPath, got.Status.CurrentLinkTarget)
+				assert.NotContains(t, got.Status.ValidLinkTargets, brokenPath)
+			} else {
+				assert.Equal(t, goodPath, got.Status.CurrentLinkTarget)
+			}
 		})
 	}
 }

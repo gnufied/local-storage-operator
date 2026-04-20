@@ -560,6 +560,133 @@ func TestGetPathByIDFail(t *testing.T) {
 	}
 }
 
+func TestGetBlockDevice(t *testing.T) {
+	testcases := []struct {
+		label               string
+		symlinkPath         string
+		fakeEvalSymlinkfunc func(string) (string, error)
+		blkIDOutput         string
+		lsblkOutput         string
+		expected            BlockDevice
+	}{
+		{
+			label:       "valid by-id symlink resolves to block device",
+			symlinkPath: DiskByIDDir + "wwn-0x1234",
+			fakeEvalSymlinkfunc: func(path string) (string, error) {
+				return "/dev/sdc", nil
+			},
+			blkIDOutput: blkIDOutput1,
+			lsblkOutput: lsblkOutput2,
+			expected: BlockDevice{
+				Name:       "sdc",
+				KName:      "sdc",
+				Type:       "disk",
+				Size:       "62914560000",
+				Model:      "VBOX HARDDISK",
+				Vendor:     "ATA",
+				Rotational: "1",
+				ReadOnly:   "0",
+				Removable:  "1",
+				State:      "running",
+				FSType:     "ext4",
+				PathByID:   DiskByIDDir + "wwn-0x1234",
+			},
+		},
+		{
+			// lsblk returns multiple devices; only the one matching the resolved
+			// symlink target must be returned.
+			label:       "selects correct device when lsblk returns multiple entries",
+			symlinkPath: DiskByIDDir + "wwn-0x1234",
+			fakeEvalSymlinkfunc: func(path string) (string, error) {
+				return "/dev/sdc", nil
+			},
+			blkIDOutput: blkIDOutput1,
+			lsblkOutput: lsblkOutput1 + lsblkOutput2, // sda + sdc rows
+			expected: BlockDevice{
+				Name:       "sdc",
+				KName:      "sdc",
+				Type:       "disk",
+				Size:       "62914560000",
+				Model:      "VBOX HARDDISK",
+				Vendor:     "ATA",
+				Rotational: "1",
+				ReadOnly:   "0",
+				Removable:  "1",
+				State:      "running",
+				FSType:     "ext4",
+				PathByID:   DiskByIDDir + "wwn-0x1234",
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.label, func(t *testing.T) {
+			oldExecutor := CmdExecutor
+			oldEvalSymlinks := FilePathEvalSymLinks
+			CmdExecutor = newFakeExecutor(tc.blkIDOutput, tc.lsblkOutput)
+			FilePathEvalSymLinks = tc.fakeEvalSymlinkfunc
+			defer func() {
+				CmdExecutor = oldExecutor
+				FilePathEvalSymLinks = oldEvalSymlinks
+			}()
+
+			blockDevice, err := GetBlockDevice(tc.symlinkPath)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expected, blockDevice)
+		})
+	}
+}
+
+func TestGetBlockDeviceFail(t *testing.T) {
+	testcases := []struct {
+		label               string
+		symlinkPath         string
+		fakeEvalSymlinkfunc func(string) (string, error)
+		blkIDOutput         string
+		lsblkOutput         string
+	}{
+		{
+			label:       "path outside by-id is rejected",
+			symlinkPath: "/dev/sdb",
+		},
+		{
+			label:       "broken by-id symlink returns error",
+			symlinkPath: DiskByIDDir + "wwn-broken",
+			fakeEvalSymlinkfunc: func(path string) (string, error) {
+				return "", os.ErrNotExist
+			},
+		},
+		{
+			label:       "resolved path without matching lsblk device returns error",
+			symlinkPath: DiskByIDDir + "wwn-0x1234",
+			fakeEvalSymlinkfunc: func(path string) (string, error) {
+				return "/dev/sdc", nil
+			},
+			blkIDOutput: blkIDOutput1,
+			lsblkOutput: lsblkOutput1, // only sda/sda1; sdc not present → no match
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.label, func(t *testing.T) {
+			oldExecutor := CmdExecutor
+			oldEvalSymlinks := FilePathEvalSymLinks
+			if tc.fakeEvalSymlinkfunc != nil {
+				FilePathEvalSymLinks = tc.fakeEvalSymlinkfunc
+			}
+			CmdExecutor = newFakeExecutor(tc.blkIDOutput, tc.lsblkOutput)
+			defer func() {
+				CmdExecutor = oldExecutor
+				FilePathEvalSymLinks = oldEvalSymlinks
+			}()
+
+			blockDevice, err := GetBlockDevice(tc.symlinkPath)
+			assert.Error(t, err)
+			assert.Equal(t, BlockDevice{}, blockDevice)
+		})
+	}
+}
+
 func TestParseBitBool(t *testing.T) {
 	testcases := []struct {
 		label    string

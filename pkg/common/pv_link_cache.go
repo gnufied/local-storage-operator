@@ -114,6 +114,40 @@ func (c CurrentBlockDeviceInfo) getLVDLAndPV(ctx context.Context, client client.
 	return lvdl, pv, nil
 }
 
+// GetLVDLAndBlockDevice returns the LVDL and the first resolvable block device
+// found among the LVDL's ValidLinkTargets. If no valid target resolves,
+// blockDevice will be zero-valued.
+func (c CurrentBlockDeviceInfo) GetLVDLAndBlockDevice() (*v1.LocalVolumeDeviceLink, internal.BlockDevice) {
+	lvdl := c.GetLVDL()
+	if lvdl == nil {
+		return nil, internal.BlockDevice{}
+	}
+	for _, target := range lvdl.Status.ValidLinkTargets {
+		bd, err := internal.GetBlockDeviceFn(target)
+		if err == nil {
+			return lvdl, bd
+		}
+	}
+	return lvdl, internal.BlockDevice{}
+}
+
+// GetLVDL returns the LocalVolumeDeviceLink associated with this device info.
+// If more than one LVDL maps to the same symlink (unexpected), a warning is
+// logged and one is picked arbitrarily. Returns nil when the set is empty.
+func (c CurrentBlockDeviceInfo) GetLVDL() *v1.LocalVolumeDeviceLink {
+	if len(c.lvdls) > 1 {
+		names := make([]string, 0, len(c.lvdls))
+		for name := range c.lvdls {
+			names = append(names, name)
+		}
+		klog.Warningf("more than one LVDL maps to the same symlink; picking one arbitrarily from: %v", names)
+	}
+	for _, v := range c.lvdls {
+		return v
+	}
+	return nil
+}
+
 func NewLocalVolumeDeviceLinkCache(client client.Client, mgr manager.Manager, localNodeName string) *LocalVolumeDeviceLinkCache {
 	return &LocalVolumeDeviceLinkCache{
 		client:           client,
@@ -198,6 +232,18 @@ func (l *LocalVolumeDeviceLinkCache) watchForEvents(informer cache.Informer) (k8
 			}
 		},
 	})
+}
+
+func (l *LocalVolumeDeviceLinkCache) GetDirectLVDLMatch(symlink string) (CurrentBlockDeviceInfo, bool) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	info, ok := l.localDeviceInfos[symlink]
+	if ok {
+		cloned := CurrentBlockDeviceInfo{lvdls: make(map[string]*v1.LocalVolumeDeviceLink, len(info.lvdls))}
+		maps.Copy(cloned.lvdls, info.lvdls)
+		return cloned, true
+	}
+	return CurrentBlockDeviceInfo{}, false
 }
 
 func (l *LocalVolumeDeviceLinkCache) FindStalePVs(symlink string, blockDevice internal.BlockDevice) (CurrentBlockDeviceInfo, bool, error) {

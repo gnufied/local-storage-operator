@@ -19,6 +19,7 @@ import (
 var (
 	FilePathGlob                            = filepath.Glob
 	FilePathEvalSymLinks                    = filepath.EvalSymlinks
+	GetBlockDeviceFn                        = GetBlockDevice
 	mountFile                               = "/proc/1/mountinfo"
 	Readlink                                = os.Readlink
 	CmdExecutor          utilexec.Interface = utilexec.New()
@@ -373,6 +374,34 @@ func ListBlockDevices(devices []string) ([]BlockDevice, []string, error) {
 	}
 
 	return blockDevices, badRows, nil
+}
+
+// GetBlockDevice resolves a /dev/disk/by-id symlink and returns the matching
+// block device reported by lsblk.
+func GetBlockDevice(symlinkPath string) (BlockDevice, error) {
+	if !strings.HasPrefix(symlinkPath, DiskByIDDir) {
+		return BlockDevice{}, fmt.Errorf("path %q is not in %q", symlinkPath, DiskByIDDir)
+	}
+
+	devicePath, err := FilePathEvalSymLinks(symlinkPath)
+	if err != nil {
+		return BlockDevice{}, fmt.Errorf("failed to resolve symlink %q: %w", symlinkPath, err)
+	}
+
+	deviceName := filepath.Base(devicePath)
+	blockDevices, _, err := ListBlockDevices([]string{devicePath})
+	if err != nil {
+		return BlockDevice{}, err
+	}
+
+	for _, blockDevice := range blockDevices {
+		if blockDevice.KName == deviceName {
+			blockDevice.PathByID = symlinkPath
+			return blockDevice, nil
+		}
+	}
+
+	return BlockDevice{}, fmt.Errorf("no block device found for symlink %q resolving to %q", symlinkPath, devicePath)
 }
 
 func parseLSBLKRow(row string, deviceFSMap map[string]string) map[string]any {

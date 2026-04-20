@@ -394,7 +394,7 @@ func (r *LocalVolumeReconciler) processValidDevices(ctx context.Context, validDe
 		symLinkDirPath := path.Join(r.symlinkLocation, storageClass)
 
 		for _, devicePath := range devicePaths {
-			deviceLocation, matched, err := r.resolveValidDeviceLocation(devicePath, forceWipe, validDevices)
+			deviceLocation, matched, err := r.resolveValidDeviceLocation(ctx, devicePath, forceWipe, validDevices)
 			if err != nil {
 				r.reportDeviceResolutionError(devicePath, err)
 				continue
@@ -448,7 +448,7 @@ func (r *LocalVolumeReconciler) logDeviceError(diskDevPath string) {
 	klog.Info(msg)
 }
 
-func (r *LocalVolumeReconciler) resolveValidDeviceLocation(devicePath string, forceWipe bool, validDevices []internal.BlockDevice) (*internal.DiskLocation, bool, error) {
+func (r *LocalVolumeReconciler) resolveValidDeviceLocation(ctx context.Context, devicePath string, forceWipe bool, validDevices []internal.BlockDevice) (*internal.DiskLocation, bool, error) {
 	deviceLocation := &internal.DiskLocation{
 		UserProvidedPath: devicePath,
 		ForceWipe:        forceWipe,
@@ -458,6 +458,9 @@ func (r *LocalVolumeReconciler) resolveValidDeviceLocation(devicePath string, fo
 	if strings.HasPrefix(devicePath, diskByIDPrefix) {
 		matchedDeviceID, matchedDiskName, err := r.findDeviceByID(devicePath)
 		if err != nil {
+			if stalePVErr := r.updatePVLinkStatusOnLookupFailure(ctx, devicePath); stalePVErr != nil {
+				klog.Errorf("failed to update PV link status for device %q: %v", devicePath, stalePVErr)
+			}
 			return nil, false, err
 		}
 		baseDeviceName = filepath.Base(matchedDiskName)
@@ -478,6 +481,25 @@ func (r *LocalVolumeReconciler) resolveValidDeviceLocation(devicePath string, fo
 	}
 	deviceLocation.BlockDevice = blockDevice
 	return deviceLocation, true, nil
+}
+
+func (r *LocalVolumeReconciler) updatePVLinkStatusOnLookupFailure(ctx context.Context, devicePath string) error {
+	currentDevice, found := r.pvLinkCache.GetDirectLVDLMatch(devicePath)
+	if !found {
+		return nil
+	}
+	lvdl, blockDevice := currentDevice.GetLVDLAndBlockDevice()
+	if lvdl == nil {
+		return nil
+	}
+	if blockDevice == (internal.BlockDevice{}) {
+		klog.Warningf("Found matching LVDL for devicePath %s, but devicePath points to no valid device", devicePath)
+		return nil
+	}
+
+	deviceLinkHandler := common.NewDeviceLinkHandler(r.Client, r.ClientReader, r.runtimeConfig.Recorder, r.pvLinkCache, r.runtimeConfig.Node.Name)
+	_, err := deviceLinkHandler.ApplyStatus(ctx, lvdl.Name, r.runtimeConfig.Namespace, blockDevice, r.localVolume, devicePath)
+	return err
 }
 
 func (r *LocalVolumeReconciler) provisionValidDevice(ctx context.Context, storageClass, symLinkDirPath, devicePath string, deviceLocation *internal.DiskLocation, mountPointMap sets.Set[string]) bool {

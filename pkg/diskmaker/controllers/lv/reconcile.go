@@ -67,6 +67,8 @@ type LocalVolumeReconciler struct {
 	pvLinkCache     *common.LocalVolumeDeviceLinkCache
 	cacheSynced     bool
 
+	deviceLinkHandler *common.DeviceLinkHandler
+
 	// static-provisioner stuff
 	cleanupTracker *provDeleter.CleanupStatusTracker
 	runtimeConfig  *provCommon.RuntimeConfig
@@ -456,16 +458,11 @@ func (r *LocalVolumeReconciler) resolveValidDeviceLocation(ctx context.Context, 
 
 	baseDeviceName := ""
 	if strings.HasPrefix(devicePath, diskByIDPrefix) {
-		matchedDeviceID, matchedDiskName, err := r.findDeviceByID(devicePath)
+		deviceLocation, err := r.processByIDDevicePath(ctx, deviceLocation)
 		if err != nil {
-			if stalePVErr := r.updatePVLinkStatusOnLookupFailure(ctx, devicePath); stalePVErr != nil {
-				klog.Errorf("failed to update PV link status for device %q: %v", devicePath, stalePVErr)
-			}
-			return nil, false, err
+			return deviceLocation, false, err
 		}
-		baseDeviceName = filepath.Base(matchedDiskName)
-		deviceLocation.DiskNamePath = matchedDiskName
-		deviceLocation.DiskID = matchedDeviceID
+		baseDeviceName = filepath.Base(deviceLocation.DiskNamePath)
 	} else {
 		diskDevPath, err := r.fsInterface.evalSymlink(devicePath)
 		if err != nil {
@@ -483,23 +480,67 @@ func (r *LocalVolumeReconciler) resolveValidDeviceLocation(ctx context.Context, 
 	return deviceLocation, true, nil
 }
 
-func (r *LocalVolumeReconciler) updatePVLinkStatusOnLookupFailure(ctx context.Context, devicePath string) error {
-	currentDevice, found := r.pvLinkCache.GetDirectLVDLMatch(devicePath)
-	if !found {
-		return nil
-	}
-	lvdl, blockDevice := currentDevice.GetLVDLAndBlockDevice()
-	if lvdl == nil {
-		return nil
-	}
-	if blockDevice == (internal.BlockDevice{}) {
-		klog.Warningf("Found matching LVDL for devicePath %s, but devicePath points to no valid device", devicePath)
-		return nil
+func (r *LocalVolumeReconciler) processByIDDevicePath(ctx context.Context, deviceLocation *internal.DiskLocation) (*internal.DiskLocation, error) {
+	matchedDeviceID, matchedDiskName, err := r.findDeviceByID(deviceLocation.UserProvidedPath)
+	if err == nil {
+		deviceLocation.DiskID = matchedDeviceID
+		deviceLocation.DiskNamePath = matchedDiskName
+		return deviceLocation, nil
 	}
 
-	deviceLinkHandler := common.NewDeviceLinkHandler(r.Client, r.ClientReader, r.runtimeConfig.Recorder, r.pvLinkCache, r.runtimeConfig.Node.Name)
-	_, err := deviceLinkHandler.ApplyStatus(ctx, lvdl.Name, r.runtimeConfig.Namespace, blockDevice, r.localVolume, devicePath)
-	return err
+	klog.Errorf("error evaluating path %s, trying to find correct device using lvdl: %v", deviceLocation.UserProvidedPath, err)
+
+	currentBlockDeviceInfo, found := r.pvLinkCache.GetDirectLVDLMatch(deviceLocation.UserProvidedPath)
+
+	if found {
+		deviceLocation, lvdl, err := r.getDeviceLocationFromLVDL(currentBlockDeviceInfo, deviceLocation)
+		if err != nil {
+			return deviceLocation, err
+		}
+		// if DiskNamePath was set that means, we found a valid device using lvdl which can be used atfer relinking
+		if deviceLocation.DiskNamePath != "" {
+			return deviceLocation, nil
+		}
+
+		if lvdl != nil {
+			// if we are here that means, lvdl exists but user has not chosen to use PreferredLinkTarget policy
+			// and user provided path does not exist
+			_, err := r.deviceLinkHandler.UpdateDeviceLinks(ctx, lvdl, deviceLocation.BlockDevice, deviceLocation.UserProvidedPath)
+			if err != nil {
+				return deviceLocation, fmt.Errorf("user provided path %s does not exist for LocalVolume %s and failed to updated lvdl %v", deviceLocation.UserProvidedPath, r.localVolume.Name, err)
+			}
+		}
+	}
+
+	return deviceLocation, fmt.Errorf("user provided path %s does not exist for localvolume %s", deviceLocation.UserProvidedPath, r.localVolume.Name)
+}
+
+// getDeviceLocationFromLVDL has to handle three different cases
+// - no lvdl found kind rare and impossible after GetDirectLVDLMatch has found, but we should handle it anyways
+// - lvdl found, but none of the validLinkTargets point to a device
+func (r *LocalVolumeReconciler) getDeviceLocationFromLVDL(currentBlockDeviceInfo common.CurrentBlockDeviceInfo, deviceLocation *internal.DiskLocation) (*internal.DiskLocation, *localv1.LocalVolumeDeviceLink, error) {
+	lvdl, blockDevice := currentBlockDeviceInfo.GetLVDLAndBlockDevice()
+	if lvdl == nil {
+		return nil, nil, fmt.Errorf("no associated lvdl found for device %s", deviceLocation.UserProvidedPath)
+	}
+
+	if (blockDevice == internal.BlockDevice{}) {
+		return nil, lvdl, fmt.Errorf("path %s points to no valid block device", deviceLocation.UserProvidedPath)
+	}
+	deviceLocation.BlockDevice = blockDevice
+
+	if lvdl.Spec.Policy == localv1.DeviceLinkPolicyPreferredLinkTarget {
+		matchedDiskName, err := blockDevice.GetDevPath()
+		if err != nil {
+			return nil, lvdl, fmt.Errorf("error finding device associated with %s: %v", deviceLocation.UserProvidedPath, err)
+		}
+
+		deviceLocation.DiskNamePath = matchedDiskName
+		// we set matched deviceID as empty string on purpose to let LSO pick the default symlink in /dev/disk/by-id
+		deviceLocation.DiskID = ""
+		return deviceLocation, lvdl, nil
+	}
+	return deviceLocation, lvdl, nil
 }
 
 func (r *LocalVolumeReconciler) provisionValidDevice(ctx context.Context, storageClass, symLinkDirPath, devicePath string, deviceLocation *internal.DiskLocation, mountPointMap sets.Set[string]) bool {
@@ -685,15 +726,14 @@ func (r *LocalVolumeReconciler) processRejectedDevicesForDeviceLinks(ctx context
 			existingSymlinkName := filepath.Base(symlinkPath)
 
 			lvdlName := common.GeneratePVName(existingSymlinkName, r.runtimeConfig.Node.Name, storageClassName)
-			deviceHandler := common.NewDeviceLinkHandler(r.Client, r.ClientReader, r.runtimeConfig.Recorder, r.pvLinkCache, r.runtimeConfig.Node.Name)
 
-			lvdl, err := deviceHandler.FindLVDL(ctx, lvdlName, r.runtimeConfig.Namespace)
+			lvdl, err := r.deviceLinkHandler.FindLVDL(ctx, lvdlName, r.runtimeConfig.Namespace)
 			if err != nil && !apierrors.IsNotFound(err) {
 				klog.ErrorS(err, "error finding lvdl", "lvdl", lvdlName)
 			}
 			var lvdlError error
 			if common.HasMismatchingSymlink(lvdl, blockDevice) {
-				_, lvdlError = deviceHandler.RecreateSymlinkIfNeeded(ctx, lvdl, symlinkPath, blockDevice)
+				_, lvdlError = r.deviceLinkHandler.RecreateSymlinkIfNeeded(ctx, lvdl, symlinkPath, blockDevice)
 			} else {
 				// it is possible that symlinkPath has become stale, in which case we must let RecreateSymlinkIfNeeded to fix it.
 				currentLinkTarget, err := internal.Readlink(symlinkPath)
@@ -701,7 +741,7 @@ func (r *LocalVolumeReconciler) processRejectedDevicesForDeviceLinks(ctx context
 					klog.ErrorS(err, "failed to read current symlink target", "devicePath", symlinkPath)
 					continue
 				}
-				_, lvdlError = deviceHandler.ApplyStatus(ctx, lvdlName, r.runtimeConfig.Namespace, blockDevice, r.localVolume, currentLinkTarget)
+				_, lvdlError = r.deviceLinkHandler.ApplyStatus(ctx, lvdlName, r.runtimeConfig.Namespace, blockDevice, r.localVolume, currentLinkTarget)
 			}
 			if lvdlError != nil {
 				msg := fmt.Errorf("failed to process lvdl %w", lvdlError)
@@ -736,7 +776,7 @@ func ignoreDevices(dev internal.BlockDevice) bool {
 	return false
 }
 
-// findDeviceByID finds device ID and return device name(such as sda, sdb) and complete deviceID path
+// findDeviceByID finds device ID and return device name(such as /dev/sda, /dev/sdb) and complete deviceID path
 func (r *LocalVolumeReconciler) findDeviceByID(deviceID string) (string, string, error) {
 	diskDevPath, err := r.fsInterface.evalSymlink(deviceID)
 	if err != nil {
@@ -767,16 +807,17 @@ func NewLocalVolumeReconciler(client client.Client, clientReader client.Reader, 
 	deleter := provDeleter.NewDeleter(rc, cleanupTracker)
 
 	lvReconciler := &LocalVolumeReconciler{
-		Client:          client,
-		ClientReader:    clientReader,
-		Scheme:          scheme,
-		symlinkLocation: symlinkLocation,
-		eventSync:       newEventReporter(rc.Recorder),
-		fsInterface:     NixFileSystemInterface{},
-		cleanupTracker:  cleanupTracker,
-		runtimeConfig:   rc,
-		deleter:         deleter,
-		pvLinkCache:     pvLinkCache,
+		Client:            client,
+		ClientReader:      clientReader,
+		Scheme:            scheme,
+		symlinkLocation:   symlinkLocation,
+		eventSync:         newEventReporter(rc.Recorder),
+		fsInterface:       NixFileSystemInterface{},
+		cleanupTracker:    cleanupTracker,
+		runtimeConfig:     rc,
+		deleter:           deleter,
+		pvLinkCache:       pvLinkCache,
+		deviceLinkHandler: common.NewDeviceLinkHandler(client, clientReader, rc.Recorder, pvLinkCache, rc.Node.Name),
 	}
 
 	return lvReconciler

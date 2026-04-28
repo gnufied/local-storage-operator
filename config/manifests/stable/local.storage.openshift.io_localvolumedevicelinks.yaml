@@ -140,6 +140,18 @@ spec:
                   recommends using this symlink, after a careful review by the cluster admin.
                 maxLength: 4096
                 type: string
+              symlinkPath:
+                description: |-
+                  symlinkPath is the path of the symlink in /mnt/local-storage directory that points to
+                  the actual local device.
+                  This path is used by corresponding PersistentVolume (PV) object for all operations (e.g. mount).
+                  LSO creates and updates this symlink for the whole lifetime of the PV.
+                  The symlink path is immutable once set.
+                maxLength: 4096
+                type: string
+                x-kubernetes-validations:
+                - message: symlinkPath is immutable once set
+                  rule: self == oldSelf || oldSelf == ''
               validLinkTargets:
                 description: |-
                   validLinkTargets is the list of /dev/disk/by-id symlinks for the device that the local

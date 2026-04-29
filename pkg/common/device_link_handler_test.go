@@ -136,6 +136,7 @@ func TestDeviceLinkHandler_UpdateStatusAndPV(t *testing.T) {
 		ownerObj       runtime.Object
 		existing       *v1.LocalVolumeDeviceLink
 		existingPV     *corev1.PersistentVolume
+		symlinkPath    string
 		globLinks      []string
 		filesystemUUID string
 		expectedLVDL   *v1.LocalVolumeDeviceLink
@@ -150,6 +151,7 @@ func TestDeviceLinkHandler_UpdateStatusAndPV(t *testing.T) {
 			ownerObj:       newLocalVolume("lv-statustest", "default", "11111111-aaaa-bbbb-cccc-111111111111"),
 			existing:       newLVDL("local-pv-statustest", "default", "local-pv-statustest"),
 			existingPV:     newPV("local-pv-statustest"),
+			symlinkPath:    "/mnt/local-storage/mysc/mylink",
 			globLinks:      []string{"/dev/disk/by-id/wwn-preferred", "/dev/disk/by-id/scsi-abcde"},
 			filesystemUUID: "550e8400-e29b-41d4-a716-446655440000",
 			expectedLVDL: &v1.LocalVolumeDeviceLink{
@@ -160,6 +162,39 @@ func TestDeviceLinkHandler_UpdateStatusAndPV(t *testing.T) {
 					PreferredLinkTarget: "/dev/disk/by-id/wwn-preferred",
 					FilesystemUUID:      "550e8400-e29b-41d4-a716-446655440000",
 					ValidLinkTargets:    []string{"/dev/disk/by-id/wwn-preferred", "/dev/disk/by-id/scsi-abcde"},
+					SymlinkPath:         "/mnt/local-storage/mysc/mylink",
+				},
+			},
+		},
+		{
+			name:           "populates symlinkPath and UUID if it was missing",
+			pvName:         "local-pv-statustest",
+			namespace:      "default",
+			currentSymlink: "/dev/disk/by-id/wwn-current",
+			blockDevice:    internal.BlockDevice{KName: "sda", PathByID: "/dev/disk/by-id/wwn-preferred"},
+			ownerObj:       newLocalVolume("lv-statustest", "default", "11111111-aaaa-bbbb-cccc-111111111111"),
+			existing: &v1.LocalVolumeDeviceLink{
+				ObjectMeta: metav1.ObjectMeta{Name: "local-pv-statustest", Namespace: "default"},
+				Spec:       v1.LocalVolumeDeviceLinkSpec{PersistentVolumeName: "local-pv-statustest", NodeName: testNodeName},
+				Status: v1.LocalVolumeDeviceLinkStatus{
+					CurrentLinkTarget:   "/dev/disk/by-id/wwn-current",
+					PreferredLinkTarget: "/dev/disk/by-id/wwn-preferred",
+					ValidLinkTargets:    []string{"/dev/disk/by-id/wwn-preferred", "/dev/disk/by-id/scsi-abcde"},
+				},
+			},
+			existingPV:     newPV("local-pv-statustest"),
+			symlinkPath:    "/mnt/local-storage/mysc/mylink",
+			globLinks:      []string{"/dev/disk/by-id/wwn-preferred", "/dev/disk/by-id/scsi-abcde"},
+			filesystemUUID: "550e8400-e29b-41d4-a716-446655440000",
+			expectedLVDL: &v1.LocalVolumeDeviceLink{
+				ObjectMeta: metav1.ObjectMeta{Name: "local-pv-statustest", Namespace: "default"},
+				Spec:       v1.LocalVolumeDeviceLinkSpec{PersistentVolumeName: "local-pv-statustest", NodeName: testNodeName},
+				Status: v1.LocalVolumeDeviceLinkStatus{
+					CurrentLinkTarget:   "/dev/disk/by-id/wwn-current",
+					PreferredLinkTarget: "/dev/disk/by-id/wwn-preferred",
+					FilesystemUUID:      "550e8400-e29b-41d4-a716-446655440000",
+					ValidLinkTargets:    []string{"/dev/disk/by-id/wwn-preferred", "/dev/disk/by-id/scsi-abcde"},
+					SymlinkPath:         "/mnt/local-storage/mysc/mylink",
 				},
 			},
 		},
@@ -172,6 +207,7 @@ func TestDeviceLinkHandler_UpdateStatusAndPV(t *testing.T) {
 			ownerObj:       newLocalVolume("lv-nolinks", "default", "22222222-aaaa-bbbb-cccc-222222222222"),
 			existing:       newLVDL("local-pv-nolinks", "default", "local-pv-nolinks"),
 			existingPV:     newPV("local-pv-nolinks"),
+			symlinkPath:    "/mnt/local-storage/mysc/mylink",
 			expectedLVDL: &v1.LocalVolumeDeviceLink{
 				ObjectMeta: metav1.ObjectMeta{Name: "local-pv-nolinks", Namespace: "default"},
 				Spec:       v1.LocalVolumeDeviceLinkSpec{PersistentVolumeName: "local-pv-nolinks", NodeName: testNodeName},
@@ -180,6 +216,7 @@ func TestDeviceLinkHandler_UpdateStatusAndPV(t *testing.T) {
 					PreferredLinkTarget: "",
 					FilesystemUUID:      "",
 					ValidLinkTargets:    []string{},
+					SymlinkPath:         "/mnt/local-storage/mysc/mylink",
 				},
 			},
 		},
@@ -192,6 +229,7 @@ func TestDeviceLinkHandler_UpdateStatusAndPV(t *testing.T) {
 			ownerObj:       newLocalVolume("lv-fullflow", "openshift-local-storage", "33333333-aaaa-bbbb-cccc-333333333333"),
 			existing:       newLVDL("local-pv-fullflow", "openshift-local-storage", "local-pv-fullflow"),
 			existingPV:     newPV("local-pv-fullflow"),
+			symlinkPath:    "/mnt/local-storage/mysc/mylink",
 			globLinks:      []string{"/dev/disk/by-id/wwn-preferred"},
 			expectedLVDL: &v1.LocalVolumeDeviceLink{
 				ObjectMeta: metav1.ObjectMeta{Name: "local-pv-fullflow", Namespace: "openshift-local-storage"},
@@ -201,17 +239,18 @@ func TestDeviceLinkHandler_UpdateStatusAndPV(t *testing.T) {
 					PreferredLinkTarget: "/dev/disk/by-id/wwn-preferred",
 					FilesystemUUID:      "",
 					ValidLinkTargets:    []string{"/dev/disk/by-id/wwn-preferred"},
+					SymlinkPath:         "/mnt/local-storage/mysc/mylink",
 				},
 			},
 		},
 		{
-			name:           "returns without updating when pv does not exist",
-			pvName:         "local-pv-missing",
-			namespace:      "default",
-			currentSymlink: "/dev/sdd",
-			blockDevice:    internal.BlockDevice{KName: "sdd"},
-			ownerObj:       newLocalVolume("lv-missing-pv", "default", "44444444-aaaa-bbbb-cccc-444444444444"),
-			existing:       newLVDL("local-pv-missing", "default", "local-pv-missing"),
+			name:        "returns without updating when pv does not exist",
+			pvName:      "local-pv-missing",
+			namespace:   "default",
+			symlinkPath: "/mnt/local-storage/mysc/mylink",
+			blockDevice: internal.BlockDevice{KName: "sdd"},
+			ownerObj:    newLocalVolume("lv-missing-pv", "default", "44444444-aaaa-bbbb-cccc-444444444444"),
+			existing:    newLVDL("local-pv-missing", "default", "local-pv-missing"),
 		},
 		{
 			name:           "creates lvdl during status update when pv exists and create was skipped",
@@ -221,6 +260,7 @@ func TestDeviceLinkHandler_UpdateStatusAndPV(t *testing.T) {
 			blockDevice:    internal.BlockDevice{KName: "sde"},
 			ownerObj:       newLocalVolume("lv-create-on-update", "default", "55555555-aaaa-bbbb-cccc-555555555555"),
 			existingPV:     newPV("local-pv-lvdl-missing"),
+			symlinkPath:    "/mnt/local-storage/mysc/mylink",
 			expectedLVDL: &v1.LocalVolumeDeviceLink{
 				ObjectMeta: metav1.ObjectMeta{Name: "local-pv-lvdl-missing", Namespace: "default"},
 				Spec: v1.LocalVolumeDeviceLinkSpec{
@@ -233,6 +273,7 @@ func TestDeviceLinkHandler_UpdateStatusAndPV(t *testing.T) {
 					PreferredLinkTarget: "",
 					FilesystemUUID:      "",
 					ValidLinkTargets:    []string{},
+					SymlinkPath:         "/mnt/local-storage/mysc/mylink",
 				},
 			},
 			verifyOwnerRef: true,
@@ -274,7 +315,7 @@ func TestDeviceLinkHandler_UpdateStatusAndPV(t *testing.T) {
 				internal.CmdExecutor = fakeBlkidExecutor(tc.filesystemUUID)
 			}
 
-			updated, err := handler.ApplyStatus(context.TODO(), tc.pvName, tc.namespace, tc.blockDevice, tc.ownerObj, tc.currentSymlink)
+			updated, err := handler.ApplyStatus(context.TODO(), tc.pvName, tc.namespace, tc.blockDevice, tc.ownerObj, tc.currentSymlink, tc.symlinkPath)
 			if err != nil {
 				t.Fatalf("UpdateStatusAndPV returned unexpected error: %v", err)
 			}
@@ -291,6 +332,7 @@ func TestDeviceLinkHandler_UpdateStatusAndPV(t *testing.T) {
 			assert.Equal(t, tc.expectedLVDL.Status.CurrentLinkTarget, updated.Status.CurrentLinkTarget)
 			assert.Equal(t, tc.expectedLVDL.Status.PreferredLinkTarget, updated.Status.PreferredLinkTarget)
 			assert.Equal(t, tc.expectedLVDL.Status.FilesystemUUID, updated.Status.FilesystemUUID)
+			assert.Equal(t, tc.expectedLVDL.Status.SymlinkPath, updated.Status.SymlinkPath)
 			assert.ElementsMatch(t, tc.expectedLVDL.Status.ValidLinkTargets, updated.Status.ValidLinkTargets)
 
 			fetched := &v1.LocalVolumeDeviceLink{}

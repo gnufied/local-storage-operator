@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"runtime/coverage"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
@@ -28,12 +31,27 @@ var discoveryDaemonCmd = &cobra.Command{
 }
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, syscall.SIGUSR1)
+		for range ch {
+			if dir := os.Getenv("GOCOVERDIR"); dir != "" {
+				coverage.WriteCountersDir(dir)
+				coverage.WriteMetaDir(dir)
+			}
+		}
+	}()
+
 	rootCmd.AddCommand(lvDaemonCmd)
 	rootCmd.AddCommand(managerCmd)
 	rootCmd.AddCommand(discoveryDaemonCmd)
 
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+	return rootCmd.Execute()
 }

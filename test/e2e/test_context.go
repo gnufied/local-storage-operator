@@ -71,6 +71,8 @@ func (tc *testContext) addHostSymlink(nodeHostname, currentLink, newLink string)
 // Cleanup deletes LV/LVSet CRs and owned PVs first, then removes host symlinks.
 // Safe to call even if some fields are nil (best-effort, idempotent).
 func (tc *testContext) Cleanup() {
+	collectDiskmakerCoverage(tc.namespace)
+
 	// 1. Delete LV/LVSet CRs + owned PVs + StorageClasses FIRST.
 	//    diskmaker's quick_reset.sh resolves the symlink chain and validates
 	//    the block device; by-id symlinks must be present or the wipe stalls.

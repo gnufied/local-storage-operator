@@ -73,6 +73,7 @@ var _ = Describe("LocalVolumeSet", Label("LocalVolumeSet"), Ordered, func() {
 
 		lvSets = []*localv1alpha1.LocalVolumeSet{}
 		DeferCleanup(func() error {
+			collectDiskmakerCoverage(namespace)
 			return cleanupLVSetResources(&lvSets)
 		})
 
@@ -95,6 +96,7 @@ var _ = Describe("LocalVolumeSet", Label("LocalVolumeSet"), Ordered, func() {
 		err = f.Client.Create(context.TODO(), noOpLVSet, nil)
 		Expect(err).NotTo(HaveOccurred(), "create noop localvolumeset")
 		DeferCleanup(func() {
+			collectDiskmakerCoverage(namespace)
 			eventuallyDelete(noOpLVSet)
 		})
 
@@ -189,6 +191,7 @@ var _ = Describe("LocalVolumeSet", Label("LocalVolumeSet"), Ordered, func() {
 
 		It("cleans up shared by-id reproducer", func() {
 			f.Logf("cleaning up LocalVolumeSet duplicate by-id reproducer before continuing with standard test flow")
+			collectDiskmakerCoverage(namespace)
 			sharedLVSet := tc.lvSets[0]
 			eventuallyDelete(sharedLVSet)
 			waitForLVSetAndOwnedPVsToDisappear(sharedLVSet)

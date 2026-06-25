@@ -26,6 +26,10 @@ func TestE2E(t *testing.T) {
 	RunSpecs(t, "Local Storage Operator E2E Suite")
 }
 
+var _ = AfterSuite(func() {
+	collectDiskmakerCoverage(framework.Global.OperatorNamespace)
+})
+
 var _ = BeforeSuite(func() {
 	GinkgoWriter.TeeTo(os.Stdout)
 

@@ -168,6 +168,7 @@ var _ = Describe("LocalVolume", Label("LocalVolume"), Ordered, func() {
 
 		It("cleans up shared by-id reproducer", func() {
 			f.Logf("cleaning up LocalVolume duplicate by-id reproducer before continuing with standard test flow")
+			collectDiskmakerCoverage(namespace)
 			cleanupLVAndWaitForOwnedPVsToDisappear(f, tc.localVolume)
 		})
 	})

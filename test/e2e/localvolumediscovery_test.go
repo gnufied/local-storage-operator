@@ -55,6 +55,7 @@ var _ = Describe("LocalVolumeDiscovery", Label("LocalVolumeDiscovery"), Ordered,
 		Expect(err).NotTo(HaveOccurred(), "creating localvolumediscovery cr")
 
 		DeferCleanup(func() {
+			collectDiskmakerCoverage(namespace)
 			deleteResource(localVolumeDiscovery, localVolumeDiscovery.Namespace, localVolumeDiscovery.Name, f.Client)
 		})
 	})

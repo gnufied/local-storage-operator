@@ -160,3 +160,35 @@ clean: clean-controller-gen clean-yq
 test_e2e:
 	./hack/test-e2e.sh
 .PHONY: test_e2e
+
+# Coverage-instrumented builds for e2e coverage measurement
+build-operator-cover:
+	env GOOS=$(TARGET_GOOS) GOARCH=$(TARGET_GOARCH) go build -cover -covermode=atomic -mod=vendor -ldflags '-X main.version=$(REV)' -o $(TARGET_DIR)/local-storage-operator $(CURPATH)/cmd/local-storage-operator
+.PHONY: build-operator-cover
+
+build-diskmaker-cover:
+	env GOOS=$(TARGET_GOOS) GOARCH=$(TARGET_GOARCH) go build -cover -covermode=atomic -mod=vendor -ldflags '-X main.version=$(REV)' -o $(TARGET_DIR)/diskmaker $(CURPATH)/cmd/diskmaker-manager
+.PHONY: build-diskmaker-cover
+
+build-cover: build-operator-cover build-diskmaker-cover
+.PHONY: build-cover
+
+operator-container-cover:
+	$(TOOL_BIN) build -t $(OPERATOR_IMAGE) -f $(CURPATH)/Dockerfile.rhel7.coverage .
+.PHONY: operator-container-cover
+
+diskmaker-container-cover:
+	$(TOOL_BIN) build -t $(DISKMAKER_IMAGE) -f $(CURPATH)/Dockerfile.diskmaker.coverage .
+.PHONY: diskmaker-container-cover
+
+images-cover: operator-container-cover diskmaker-container-cover
+.PHONY: images-cover
+
+push-cover: images-cover
+	$(TOOL_BIN) push $(OPERATOR_IMAGE)
+	$(TOOL_BIN) push $(DISKMAKER_IMAGE)
+.PHONY: push-cover
+
+bundle-cover: ensure-yq push-cover
+	./hack/create-bundle.sh --coverage $(OPERATOR_IMAGE) $(DISKMAKER_IMAGE) $(BUNDLE_IMAGE) $(INDEX_IMAGE)
+.PHONY: bundle-cover

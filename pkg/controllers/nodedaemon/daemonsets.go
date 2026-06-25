@@ -171,6 +171,26 @@ func MutateAggregatedSpec(
 	ds.Spec.UpdateStrategy = dsTemplate.Spec.UpdateStrategy
 	// to read /proc/1/mountinfo
 	ds.Spec.Template.Spec.HostPID = dsTemplate.Spec.Template.Spec.HostPID
+
+	if coverDir := os.Getenv("LSO_COVERAGE_DIR"); coverDir != "" {
+		ds.Spec.Template.Spec.Volumes = append(ds.Spec.Template.Spec.Volumes, corev1.Volume{
+			Name: "coverage-data",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		})
+		ds.Spec.Template.Spec.Containers[0].VolumeMounts = append(
+			ds.Spec.Template.Spec.Containers[0].VolumeMounts,
+			corev1.VolumeMount{
+				Name:      "coverage-data",
+				MountPath: coverDir,
+			},
+		)
+		ds.Spec.Template.Spec.Containers[0].Env = append(
+			ds.Spec.Template.Spec.Containers[0].Env,
+			corev1.EnvVar{Name: "GOCOVERDIR", Value: coverDir},
+		)
+	}
 }
 
 func initMapIfNil(m *map[string]string) {

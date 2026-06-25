@@ -1,0 +1,18 @@
+FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.26-openshift-5.0 AS builder
+WORKDIR /go/src/github.com/openshift/local-storage-operator
+COPY . .
+RUN make build-diskmaker-cover
+
+FROM almalinux:9
+
+COPY --from=builder /go/src/github.com/openshift/local-storage-operator/_output/bin/diskmaker /usr/bin/
+COPY --from=builder /go/src/github.com/openshift/local-storage-operator/hack/scripts /scripts
+COPY config/manifests /manifests
+
+RUN yum install -y e2fsprogs xfsprogs && yum clean all && rm -rf /var/cache/yum
+
+RUN mkdir -p /var/run/coverage
+ENV GOCOVERDIR=/var/run/coverage
+ENTRYPOINT ["/usr/bin/diskmaker"]
+LABEL io.k8s.display-name="OpenShift local storage diskmaker (coverage)" \
+      io.k8s.description="Coverage-instrumented build for e2e test coverage measurement."

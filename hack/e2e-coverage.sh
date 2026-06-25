@@ -78,39 +78,16 @@ fi
 # --- Collect coverage data ---
 echo "=== Collecting coverage data ==="
 
-collect_from_pods() {
-  local label="$1"
-  local prefix="$2"
+# Diskmaker pod coverage is collected by the test code itself (via SIGUSR1)
+# before CR deletion. Here we only collect from the operator pod, which
+# persists throughout all tests.
 
-  for pod in $(oc get pods -n "$NAMESPACE" -l "$label" -o jsonpath='{.items[*].metadata.name}'); do
-    echo "  Signaling $pod for coverage flush..."
-    oc exec -n "$NAMESPACE" "$pod" -c diskmaker -- kill -TERM 1 2>/dev/null || \
-    oc exec -n "$NAMESPACE" "$pod" -- kill -TERM 1 2>/dev/null || true
-  done
-  sleep 5
-
-  for pod in $(oc get pods -n "$NAMESPACE" -l "$label" -o jsonpath='{.items[*].metadata.name}'); do
-    local dest="$OUTPUT_DIR/${prefix}-${pod}"
-    mkdir -p "$dest"
-    echo "  Copying coverage data from $pod..."
-    oc cp "$NAMESPACE/$pod:$COVER_DIR" "$dest" 2>/dev/null || \
-    oc cp "$NAMESPACE/$pod:$COVER_DIR" "$dest" -c diskmaker 2>/dev/null || true
-  done
-}
-
-# Collect from operator pod
 echo "  Signaling operator pod for coverage flush..."
-oc exec -n "$NAMESPACE" "$OPERATOR_POD" -- kill -TERM 1 2>/dev/null || true
-sleep 5
+oc exec -n "$NAMESPACE" "$OPERATOR_POD" -- kill -USR1 1 2>/dev/null || true
+sleep 3
 mkdir -p "$OUTPUT_DIR/operator"
 echo "  Copying coverage data from operator..."
 oc cp "$NAMESPACE/$OPERATOR_POD:$COVER_DIR" "$OUTPUT_DIR/operator" 2>/dev/null || true
-
-# Collect from diskmaker-manager pods
-collect_from_pods "app=diskmaker-manager" "diskmaker-manager"
-
-# Collect from diskmaker-discovery pods
-collect_from_pods "app=diskmaker-discovery" "diskmaker-discovery"
 
 # --- Merge and report ---
 echo "=== Merging coverage data ==="

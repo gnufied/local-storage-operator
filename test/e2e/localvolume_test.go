@@ -186,6 +186,7 @@ func LocalVolumeTest(ctx *framework.Context, cleanupFuncs *[]cleanupFn) func(*te
 		assertLVDLSymlinkPathMatchesPVs(t, sharedLVDLs, sharedPVs)
 
 		t.Log("cleaning up LocalVolume duplicate by-id reproducer before continuing with standard test flow")
+		collectDiskmakerCoverage(t, namespace)
 		cleanupLVAndWaitForOwnedPVsToDisappear(t, f, sharedLocalVolume)
 
 		removeUdevSymlink(t, ctx, nodeEnv[0].node.Labels[corev1.LabelHostname], sharedScsi8Link)
@@ -313,6 +314,7 @@ func LocalVolumeTest(ctx *framework.Context, cleanupFuncs *[]cleanupFn) func(*te
 			consumingObjectList = append(consumingObjectList, job, pvc, pod)
 		}
 		// attempt localVolume deletion
+		collectDiskmakerCoverage(t, namespace)
 		matcher.Eventually(func() error {
 			t.Logf("deleting LocalVolume %q", localVolume.Name)
 			return f.Client.Delete(context.TODO(), localVolume, client.PropagationPolicy(metav1.DeletePropagationBackground))

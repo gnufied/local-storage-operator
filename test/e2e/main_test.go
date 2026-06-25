@@ -110,6 +110,11 @@ func TestLocalStorage(t *testing.T) {
 			context.Cleanup()
 			return nil
 		})
+		addToCleanupFuncs(&cleanupFuncs, "collect-diskmaker-coverage", func(t *testing.T) error {
+			ns, _ := context.GetOperatorNamespace()
+			collectDiskmakerCoverage(t, ns)
+			return nil
+		})
 
 		err = enableNamespaceMetrics(t, context)
 		if err != nil {

@@ -59,7 +59,10 @@ func LocalVolumeDiscoveryTest(ctx *framework.TestCtx, cleanupFuncs *[]cleanupFn)
 			t.Fatalf("error creating localvolumediscovery cr : %v", err)
 		}
 
-		defer deleteResource(localVolumeDiscovery, localVolumeDiscovery.Name, localVolumeDiscovery.Namespace, f.Client)
+		defer func() {
+			collectDiskmakerCoverage(t, namespace)
+			deleteResource(localVolumeDiscovery, localVolumeDiscovery.Name, localVolumeDiscovery.Namespace, f.Client)
+		}()
 
 		discoveryDSName := "diskmaker-discovery"
 		err = waitForDaemonSet(t, f.KubeClient, namespace, discoveryDSName, retryInterval, timeout)
@@ -122,6 +125,7 @@ func LocalVolumeDiscoveryTest(ctx *framework.TestCtx, cleanupFuncs *[]cleanupFn)
 			t.Fatalf("error checking localvolumediscovery status. %v", err)
 		}
 
+		collectDiskmakerCoverage(t, namespace)
 		err = deleteResource(localVolumeDiscovery, localVolumeDiscovery.Name, localVolumeDiscovery.Namespace, f.Client)
 		if err != nil {
 			t.Fatalf("error deleting localvolumediscovery: %v", err)

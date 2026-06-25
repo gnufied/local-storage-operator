@@ -19,7 +19,10 @@ package main
 import (
 	"flag"
 	"os"
+	"os/signal"
 	"runtime"
+	"runtime/coverage"
+	"syscall"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -77,6 +80,17 @@ func main() {
 }
 
 func run() error {
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, syscall.SIGUSR1)
+		for range ch {
+			if dir := os.Getenv("GOCOVERDIR"); dir != "" {
+				coverage.WriteCountersDir(dir)
+				coverage.WriteMetaDir(dir)
+			}
+		}
+	}()
+
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string

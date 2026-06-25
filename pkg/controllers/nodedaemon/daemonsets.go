@@ -167,6 +167,26 @@ func MutateAggregatedSpec(
 	// define containers
 	ds.Spec.Template.Spec.Containers = dsTemplate.Spec.Template.Spec.Containers
 
+	if coverDir := os.Getenv("LSO_COVERAGE_DIR"); coverDir != "" {
+		ds.Spec.Template.Spec.Volumes = append(ds.Spec.Template.Spec.Volumes, corev1.Volume{
+			Name: "coverage-data",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		})
+		ds.Spec.Template.Spec.Containers[0].VolumeMounts = append(
+			ds.Spec.Template.Spec.Containers[0].VolumeMounts,
+			corev1.VolumeMount{
+				Name:      "coverage-data",
+				MountPath: coverDir,
+			},
+		)
+		ds.Spec.Template.Spec.Containers[0].Env = append(
+			ds.Spec.Template.Spec.Containers[0].Env,
+			corev1.EnvVar{Name: "GOCOVERDIR", Value: coverDir},
+		)
+	}
+
 	// setting maxUnavailable as a percentage
 	ds.Spec.UpdateStrategy = dsTemplate.Spec.UpdateStrategy
 	// to read /proc/1/mountinfo

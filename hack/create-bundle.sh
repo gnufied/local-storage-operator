@@ -6,8 +6,14 @@
 set -o nounset
 set -o pipefail
 
+COVERAGE=false
+if [ "${1:-}" = "--coverage" ]; then
+    COVERAGE=true
+    shift
+fi
+
 if [ "$#" -ne "4" ]; then
-    echo "Usage: $0 <input_operator_image> <input_diskmaker_image> <output_bundle_image> <output_index_image>"
+    echo "Usage: $0 [--coverage] <input_operator_image> <input_diskmaker_image> <output_bundle_image> <output_index_image>"
     exit 1
 fi
 
@@ -26,6 +32,7 @@ fi
 
 set -o errexit
 
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TOOL_NAME=$(basename $TOOL_BIN)
 OPERATOR_IMAGE=$1
 DISKMAKER_IMAGE=$2
@@ -45,6 +52,26 @@ sed -i.bak -e "s~quay.io/openshift/origin-local-storage-operator:latest~$OPERATO
 	-e "s~quay.io/openshift/origin-local-storage-diskmaker:latest~$DISKMAKER_IMAGE~" \
 	$MANIFEST
 rm $MANIFEST.bak
+
+if [ "$COVERAGE" = "true" ]; then
+    YQ="${SCRIPT_DIR}/bin/yq"
+    if [ ! -f "$YQ" ]; then
+        echo "Error: yq not found at $YQ. Run 'make ensure-yq' first." 1>&2
+        exit 1
+    fi
+
+    COVER_DIR="/var/run/coverage"
+    DEPLOY='.spec.install.spec.deployments[0].spec.template.spec'
+    CONTAINER="${DEPLOY}.containers[0]"
+
+    echo "Injecting coverage configuration into CSV..."
+    $YQ -i "${CONTAINER}.env += [{\"name\": \"GOCOVERDIR\", \"value\": \"${COVER_DIR}\"}]" "$MANIFEST"
+    $YQ -i "${CONTAINER}.env += [{\"name\": \"LSO_COVERAGE_DIR\", \"value\": \"${COVER_DIR}\"}]" "$MANIFEST"
+    $YQ -i "${CONTAINER}.volumeMounts = [{\"name\": \"coverage-data\", \"mountPath\": \"${COVER_DIR}\"}]" "$MANIFEST"
+    $YQ -i "${DEPLOY}.volumes = [{\"name\": \"coverage-data\", \"emptyDir\": {}}]" "$MANIFEST"
+    $YQ -i "${CONTAINER}.securityContext.readOnlyRootFilesystem = false" "$MANIFEST"
+    echo "Coverage configuration injected."
+fi
 
 # Build the bundle and push it
 $TOOL_BIN build -t $BUNDLE_IMAGE -f bundle.Dockerfile .
